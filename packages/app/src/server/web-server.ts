@@ -253,13 +253,27 @@ export class WebServer {
 		});
 	}
 
-	public async stop(): Promise<void> {
-		if (!this.server) {
+	/**
+	 * Stop accepting connections and wait for in-flight requests. `close()`
+	 * already drops idle keep-alive sockets; requests still running after
+	 * `drainMs` (long tool calls, progress streams) are cut off so shutdown can
+	 * move on to flushing logs.
+	 */
+	public async stop(drainMs = 5000): Promise<void> {
+		const server = this.server;
+		if (!server) {
 			return;
 		}
 
 		return new Promise((resolve, reject) => {
-			this.server?.close((err) => {
+			const forceTimer = setTimeout(() => {
+				logger.warn({ drainMs }, 'HTTP drain deadline reached; closing remaining connections');
+				server.closeAllConnections();
+			}, drainMs);
+			forceTimer.unref();
+
+			server.close((err) => {
+				clearTimeout(forceTimer);
 				if (err) {
 					reject(err);
 				} else {

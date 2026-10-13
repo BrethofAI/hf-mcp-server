@@ -27,14 +27,16 @@ cd packages/app
 
 DIST_PATH="dist/server"
 
-# Start the appropriate server based on transport type
+# Start the appropriate server based on transport type.
+# `exec` replaces this shell so node receives SIGTERM directly and can shut down
+# gracefully (drain HTTP, upload buffered dataset logs).
 case "$TRANSPORT" in
   stdio)
-    node $DIST_PATH/stdio.js --port "$PORT"
+    exec node $DIST_PATH/stdio.js --port "$PORT"
     ;;
   streamablehttpjson)
     echo "Using streamableHttpJson transport type"
-    node $DIST_PATH/streamableHttp.js --port "$PORT"
+    exec node $DIST_PATH/streamableHttp.js --port "$PORT"
     ;;
   *)
     echo "Error: Invalid transport type '$TRANSPORT'. Valid options are: stdio, streamableHttpJson"

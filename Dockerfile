@@ -3,7 +3,9 @@ FROM node:24-alpine
 
 ARG BUILD_COMMIT=unknown
 
-RUN npm install --global corepack@0.35.0 && \
+# tini runs as PID 1: forwards SIGTERM to node and reaps zombies.
+RUN apk add --no-cache tini && \
+    npm install --global corepack@0.35.0 && \
     corepack enable pnpm
 
 WORKDIR /app
@@ -68,4 +70,5 @@ ENV MCP_SERVER_BUILD_SHA=${BUILD_COMMIT}
 EXPOSE 3000
 
 # Run the startup script
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/bin/sh", "./start.sh"]

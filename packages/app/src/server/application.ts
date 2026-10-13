@@ -147,9 +147,9 @@ export class Application {
 		}
 	}
 
-	async stop(): Promise<void> {
+	async stop(options: { drainMs?: number } = {}): Promise<void> {
 		logger.info('Shutting down web server...');
-		await this.webServerInstance.stop();
+		await this.webServerInstance.stop(options.drainMs);
 
 		// Clean up transport if initialized
 		if (this.transport) {
