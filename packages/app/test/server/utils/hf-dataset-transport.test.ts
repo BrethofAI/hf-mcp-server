@@ -322,6 +322,35 @@ describe('HfDatasetLogger', () => {
 			expect((logger as unknown as { uploadCalls: unknown[] }).uploadCalls.length).toBe(1);
 		});
 
+		it('uploads logs buffered behind an in-progress upload on shutdown', async () => {
+			const uploadedBatches: number[] = [];
+			const uploadResolvers: Array<() => void> = [];
+			const slowUpload = (params: unknown): Promise<CommitOutput> => {
+				const title = (params as { commitTitle: string }).commitTitle;
+				uploadedBatches.push(Number(/Add (\d+) log entries/.exec(title)?.[1]));
+				return new Promise((resolve) => {
+					uploadResolvers.push(() => resolve({ commit: { url: 'u', oid: 'o' }, hookOutput: '' }));
+				});
+			};
+
+			logger = createTestLogger({ uploadFunction: slowUpload, batchSize: 2 });
+			logger.processLog({ level: 30, time: Date.now(), msg: 'batch-1a' });
+			logger.processLog({ level: 30, time: Date.now(), msg: 'batch-1b' });
+			expect(logger.getStatus().uploadInProgress).toBe(true);
+
+			// Arrives while the first batch is still uploading.
+			logger.processLog({ level: 30, time: Date.now(), msg: 'late' });
+
+			const destroyed = logger.destroy();
+			uploadResolvers[0]?.();
+			await new Promise((resolve) => setImmediate(resolve));
+			uploadResolvers[1]?.();
+			await destroyed;
+
+			expect(uploadedBatches).toEqual([2, 1]);
+			expect(logger.getStatus().bufferSize).toBe(0);
+		});
+
 		it('should handle shutdown gracefully even if flush fails', async () => {
 			const failingUpload = async () => {
 				throw new Error('Upload failed');

@@ -9,6 +9,7 @@ import { formatCompactNumber } from '../lib/dashboard-utils';
 import type { TransportMetricsResponse } from '../../shared/transport-metrics.js';
 import { HfFsLiveMetricsCard } from './HfFsLiveMetricsCard';
 import { DynamicSpaceLiveMetricsCard } from './DynamicSpaceLiveMetricsCard';
+import { RuntimeMetricsCard } from './RuntimeMetricsCard';
 
 type ClientMetric = TransportMetricsResponse['clients'][number];
 type ClientProtocolMetric = ClientMetric['protocols'][number];
@@ -303,6 +304,7 @@ export function StatelessTransportMetrics({ metrics }: StatelessTransportMetrics
 				/>
 			</div>
 
+			{metrics.runtimeMetrics ? <RuntimeMetricsCard metrics={metrics.runtimeMetrics} /> : null}
 			{hfFsMetrics ? <HfFsLiveMetricsCard metrics={hfFsMetrics} /> : null}
 			{metrics.dynamicSpaceMetrics ? <DynamicSpaceLiveMetricsCard metrics={metrics.dynamicSpaceMetrics} /> : null}
 

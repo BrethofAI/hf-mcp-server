@@ -1,6 +1,7 @@
 import pino, { type Logger, type LoggerOptions, type Level } from 'pino';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { registerTransportLogger } from './transport-loggers.js';
 
 const isDev = process.env.NODE_ENV === 'development';
 const activeTransport = process.env.TRANSPORT || '';
@@ -52,7 +53,7 @@ function createLogger(): Logger {
 					},
 				];
 				
-				return pino({ ...baseOptions, transport: { targets } });
+				return registerTransportLogger(pino({ ...baseOptions, transport: { targets } }), { datasetTargets: 1 });
 			} catch (error) {
 				console.error('[Logger] Failed to setup HF transport, falling back to console only:', error);
 			}
@@ -60,7 +61,7 @@ function createLogger(): Logger {
 	}
 
 	// Console-only logging (default or fallback)
-	return pino({
+	return registerTransportLogger(pino({
 		...baseOptions,
 		...(isDev ? {
 			transport: {
@@ -68,7 +69,7 @@ function createLogger(): Logger {
 				options: { colorize: true, destination },
 			},
 		} : {}),
-	}, !isDev ? pino.destination(destination) : undefined);
+	}, !isDev ? pino.destination(destination) : undefined));
 }
 
 const logger: Logger = createLogger();

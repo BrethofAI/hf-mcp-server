@@ -1,4 +1,5 @@
 import pino, { type Logger, type LoggerOptions } from 'pino';
+import { registerTransportLogger } from './transport-loggers.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { SERVER_BUILD_SHA, SERVER_VERSION } from '../server-build-info.js';
@@ -71,13 +72,16 @@ function createSkillLogger(): Logger | null {
 			level: 'info',
 			timestamp: pino.stdTimeFunctions.isoTime,
 		};
-		return pino({
-			...baseOptions,
-			transport: {
-				target: transportPath,
-				options: { sync: false, logType: 'Skill' },
-			},
-		});
+		return registerTransportLogger(
+			pino({
+				...baseOptions,
+				transport: {
+					target: transportPath,
+					options: { sync: false, logType: 'Skill' },
+				},
+			}),
+			{ datasetTargets: 1 }
+		);
 	} catch (error) {
 		console.error('[Skill Logger] Failed to setup Skills event logging transport:', error);
 		return null;

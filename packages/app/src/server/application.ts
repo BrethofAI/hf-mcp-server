@@ -9,6 +9,8 @@ import { createServerFactory } from './mcp-server.js';
 import { createProxyServerFactory } from './mcp-proxy.js';
 import { McpApiClient, type ApiClientConfig } from './utils/mcp-api-client.js';
 import { loadProxyToolsConfig } from './utils/proxy-tools-config.js';
+import { runtimeMetrics } from './utils/runtime-metrics.js';
+import { startRuntimeSampleLogging, stopRuntimeSampleLogging } from './utils/runtime-sample-logger.js';
 
 interface ApplicationOptions {
 	transportType: TransportType;
@@ -95,6 +97,9 @@ export class Application {
 		// Initialize transport (before static files to avoid route conflicts)
 		await this.initializeTransport();
 
+		runtimeMetrics.start({ sessionCount: () => this.transport?.getSessionCount() ?? 0 });
+		startRuntimeSampleLogging();
+
 		// Setup static files (must be AFTER transport routes to avoid catch-all conflicts)
 		await this.webServerInstance.setupStaticFiles(this.isDev);
 	}
@@ -147,9 +152,11 @@ export class Application {
 		}
 	}
 
-	async stop(): Promise<void> {
+	async stop(options: { drainMs?: number } = {}): Promise<void> {
+		stopRuntimeSampleLogging();
+		runtimeMetrics.stop();
 		logger.info('Shutting down web server...');
-		await this.webServerInstance.stop();
+		await this.webServerInstance.stop(options.drainMs);
 
 		// Clean up transport if initialized
 		if (this.transport) {

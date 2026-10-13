@@ -2,6 +2,8 @@ import build from 'pino-abstract-transport';
 import { uploadFile } from '@huggingface/hub';
 import type { uploadFile as UploadFileFunction } from '@huggingface/hub';
 import { randomUUID } from 'node:crypto';
+import { parentPort } from 'node:worker_threads';
+import { handleDatasetFlushRequests } from './dataset-flush-protocol.js';
 import type { Transform } from 'node:stream';
 import safeStringify from 'fast-safe-stringify';
 
@@ -67,6 +69,7 @@ export class HfDatasetLogger {
 	private flushTimer?: NodeJS.Timeout;
 	private isShuttingDown = false;
 	private uploadInProgress = false;
+	private inFlightUpload?: Promise<boolean>;
 	private sessionId: string;
 	private uploadFunction: typeof UploadFileFunction;
 	private readonly maxBufferSize: number = 10000;
@@ -132,25 +135,34 @@ export class HfDatasetLogger {
 		// buffered for the next flush.
 		const logsToUpload = this.logBuffer.splice(0, this.logBuffer.length);
 		this.uploadInProgress = true;
-		let uploadSucceeded = false;
+		const upload = this.uploadBatch(logsToUpload);
+		this.inFlightUpload = upload;
+		const uploadSucceeded = await upload;
+		if (this.inFlightUpload === upload) {
+			this.inFlightUpload = undefined;
+		}
 
+		if (uploadSucceeded && !this.isShuttingDown && this.logBuffer.length >= this.batchSize) {
+			void this.flush();
+		}
+	}
+
+	/** Upload one detached batch; on failure, return it to the front of the buffer. */
+	private async uploadBatch(logsToUpload: LogEntry[]): Promise<boolean> {
 		console.log(`[HF Dataset ${this.logType}] Starting upload of ${logsToUpload.length} logs`);
 
 		try {
 			await this.uploadLogs(logsToUpload);
-			uploadSucceeded = true;
 			console.log(`[HF Dataset ${this.logType}] ✅ Uploaded ${logsToUpload.length} logs to ${this.datasetId}`);
+			return true;
 		} catch (error) {
 			// Restore the failed batch ahead of records that arrived while it
 			// was uploading, while retaining the configured buffer bound.
 			this.logBuffer = [...logsToUpload, ...this.logBuffer].slice(-this.maxBufferSize);
 			console.error(`[HF Dataset ${this.logType}] ❌ Upload failed, will retry on next flush:`, error);
+			return false;
 		} finally {
 			this.uploadInProgress = false;
-		}
-
-		if (uploadSucceeded && this.logBuffer.length >= this.batchSize) {
-			void this.flush();
 		}
 	}
 
@@ -227,8 +239,13 @@ export class HfDatasetLogger {
 			clearInterval(this.flushTimer);
 		}
 
-		// Final flush attempt
+		// Final flush attempt. An upload already in progress would make flush()
+		// return immediately, dropping everything buffered behind it, so wait
+		// for it first and then upload the remainder.
 		try {
+			while (this.inFlightUpload) {
+				await this.inFlightUpload;
+			}
 			await this.flush();
 		} catch (error) {
 			console.error(`[HF Dataset ${this.logType}] Error during final log flush:`, error);
@@ -388,6 +405,12 @@ export default async function (opts: HfTransportOptions = {}): Promise<Transform
 			batchSize: opts.batchSize || parseInt(process.env.LOGGING_BATCH_SIZE || '100', 10),
 			flushInterval: calculateFlushInterval(opts.flushInterval),
 			logType,
+		});
+		// Final upload on shutdown is requested over the worker port (see dataset-flush-protocol.ts),
+		// because thread-stream's end() blocks the main thread and kills slow close hooks after ~10s.
+		handleDatasetFlushRequests(parentPort, logType, async () => {
+			await hfLogger.destroy();
+			return hfLogger.getStatus().bufferSize;
 		});
 		// Return a proper Pino transport using async iterator pattern (recommended)
 		return build(

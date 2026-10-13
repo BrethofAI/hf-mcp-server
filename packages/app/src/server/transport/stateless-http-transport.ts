@@ -1595,6 +1595,10 @@ export class StatelessHttpTransport extends BaseTransport {
 		return Promise.resolve();
 	}
 
+	override getSessionCount(): number {
+		return this.analyticsSessions.size;
+	}
+
 	override getSessions(): SessionMetadata[] {
 		return this.analyticsMode ? Array.from(this.analyticsSessions.values()) : [];
 	}
