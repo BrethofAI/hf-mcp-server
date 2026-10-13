@@ -728,7 +728,7 @@ export class HfFsTool {
 				metadata: { ...result.metadata, warnings: parsed.warnings },
 			};
 		}
-		return { ...result, warnings: parsed.warnings };
+		return { ...result, warnings: [...parsed.warnings, ...(result.warnings ?? [])] };
 	}
 
 	async runBatch(
@@ -1114,9 +1114,12 @@ export class HfFsTool {
 		}
 		const fetchLimit = limit + 1;
 		const entries: HfFsEntry[] = [];
+		const tags = new Set(params.tags ?? []);
+		if (params.space_kind === 'mcp') tags.add('mcp-server');
 		for await (const entry of this.searchRepoEntries(parsed.repoType, {
 			query,
 			owner: parsed.namespace,
+			tags: tags.size > 0 ? [...tags] : undefined,
 			sort: repoSearchSort(params.sort),
 			limit: fetchLimit,
 		})) {
@@ -1136,6 +1139,13 @@ export class HfFsTool {
 			uri: params.uri,
 			op: 'search',
 			entries,
+			...(entries.length === 0 && query && tags.size > 0
+				? {
+						warnings: [
+							'No repositories matched both QUERY and --tag. QUERY also filters repository names; retry with --tag alone.',
+						],
+					}
+				: {}),
 		};
 	}
 
@@ -1591,7 +1601,7 @@ export class HfFsTool {
 
 	private async *searchRepoEntries(
 		repoType: Exclude<RepoType, 'bucket'>,
-		options: { query?: string; owner?: string; sort?: RepoSearchSort; limit: number }
+		options: { query?: string; owner?: string; tags?: string[]; sort?: RepoSearchSort; limit: number }
 	): AsyncGenerator<HfFsEntry> {
 		switch (repoType) {
 			case 'model':
@@ -1599,6 +1609,7 @@ export class HfFsTool {
 					search: {
 						...(options.query ? { query: options.query } : {}),
 						...(options.owner ? { owner: options.owner } : {}),
+						...(options.tags ? { tags: options.tags } : {}),
 					},
 					...(options.sort ? { sort: options.sort } : {}),
 					limit: options.limit,
@@ -1613,6 +1624,7 @@ export class HfFsTool {
 					search: {
 						...(options.query ? { query: options.query } : {}),
 						...(options.owner ? { owner: options.owner } : {}),
+						...(options.tags ? { tags: options.tags } : {}),
 					},
 					...(options.sort ? { sort: options.sort } : {}),
 					limit: options.limit,
@@ -1627,6 +1639,7 @@ export class HfFsTool {
 					search: {
 						...(options.query ? { query: options.query } : {}),
 						...(options.owner ? { owner: options.owner } : {}),
+						...(options.tags ? { tags: options.tags } : {}),
 					},
 					...(options.sort ? { sort: options.sort } : {}),
 					...(this.hubUrl ? { hubUrl: this.hubUrl } : {}),

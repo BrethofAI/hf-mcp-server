@@ -78,6 +78,8 @@ find hf://spaces/OWNER/NAME --name app.py --type file
 cat hf://models/OWNER/NAME/README.md --offset 20000 --max-bytes 20000
 attach hf://datasets/OWNER/NAME/images/example.png
 search hf://datasets "speech recognition" --sort downloads --limit 20
+search hf://models --tag base_model:finetune:OWNER/NAME --sort downloads
+search hf://datasets/OWNER --tag modality:image --tag license:mit
 ls hf://spaces/trending
 ls hf://docs/diffusers
 search hf://docs/transformers "loading a pretrained model"
@@ -99,6 +101,31 @@ Multiple operations can be submitted together:
   ]
 }
 ```
+
+## Tag filters
+
+`search hf://models|datasets|spaces[/OWNER] [QUERY] --tag TAG` restricts results to repositories carrying the exact
+Hub tag. Repeat `--tag` to require several tags; every tag must match. QUERY is optional with a tag and also filters
+repository names, so omit it when the tag already identifies the target. `--sort` and owner scopes still apply.
+Comma-separated values are split into separate required tags; `or:` expressions are not supported. `--kind mcp` is
+shorthand for `--tag mcp-server` on `hf://spaces[/OWNER]`. Exact-root `hf://spaces` searches with QUERY, `--tag`, or
+`--kind` use semantic Space search; owner scopes use the standard listing.
+
+Common model tag families:
+
+| Family | Example |
+|---|---|
+| Derived from a base model (any relation) | `base_model:OWNER/NAME` |
+| Derived with a specific relation | `base_model:finetune:OWNER/NAME`, `base_model:adapter:…`, `base_model:merge:…`, `base_model:quantized:…` |
+| Task | `text-generation`, `image-text-to-text` |
+| Library or format | `transformers`, `gguf`, `mlx`, `peft` |
+| License, language, training data, paper | `license:apache-2.0`, `en`, `dataset:OWNER/NAME`, `arxiv:2501.00001` |
+
+Common dataset tag families: `task_categories:…`, `modality:…`, `format:…`, `size_categories:…`, `language:…`,
+`license:…`, and `library:…`. Spaces carry tags such as `gradio` and `mcp-server`.
+
+To find fine-tunes of a model, search `hf://models` with `--tag base_model:finetune:OWNER/NAME`; use
+`base_model:OWNER/NAME` to include adapters, merges, and quantizations.
 
 ## Writes
 

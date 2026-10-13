@@ -283,9 +283,9 @@ describe('parseHfFsRequest', () => {
 		});
 	});
 
-	it('rejects Space semantic filters on unsupported scopes', () => {
-		expect(() => parseHfFsRequest({ cmd: 'search', args: ['hf://spaces/alice', 'demo', '--kind', 'mcp'] })).toThrow(
-			'--tag and --kind are supported only with search hf://spaces'
+	it('rejects Space kind filters on unsupported scopes', () => {
+		expect(() => parseHfFsRequest({ cmd: 'search', args: ['hf://models/alice', 'demo', '--kind', 'mcp'] })).toThrow(
+			'--kind is supported only with search hf://spaces[/OWNER]'
 		);
 		expect(() => parseHfFsRequest({ cmd: 'search', args: ['hf://spaces', 'demo', '--kind', 'agent'] })).toThrow(
 			'Supported kinds: mcp'
@@ -404,14 +404,15 @@ describe('search discovery guidance', () => {
 		}
 		expect(HF_FS_DESCRIPTION).toContain('hf://papers, and hf://docs[/...]');
 		expect(HF_FS_DESCRIPTION).toContain(
-			'--tag (repeatable) and --kind are supported only on exactly hf://spaces, not owner scopes or other roots'
+			'--tag filters models, datasets, and Spaces by Hub tag (repeatable; all must match) and applies only to hf://models|datasets|spaces[/OWNER]'
 		);
-		expect(HF_FS_DESCRIPTION).toContain('The only valid --kind value is mcp');
+		expect(HF_FS_DESCRIPTION).toContain('base_model:ID and base_model:RELATION:ID');
+		expect(HF_FS_DESCRIPTION).toContain('the only valid --kind value is mcp');
 		expect(HF_FS_OPERATION_SCHEMA.shape.args.description).toContain(
 			'search discovers resources, not repository contents'
 		);
 		expect(HF_FS_OPERATION_SCHEMA.shape.args.description).toContain(
-			'--tag and --kind require exactly hf://spaces; the only valid --kind value is mcp'
+			'--tag requires hf://models|datasets|spaces[/OWNER]; --kind requires hf://spaces[/OWNER] and its only valid value is mcp'
 		);
 	});
 
@@ -433,21 +434,70 @@ describe('search discovery guidance', () => {
 		}
 	);
 
-	it.each(['--tag', '--kind'])('restricts %s to the exact Spaces root', (flag) => {
-		expect(parseHfFsRequest({ cmd: 'search', args: ['hf://spaces', flag, 'mcp'] }).params).toMatchObject({
-			op: 'search',
-			uri: 'hf://spaces',
-		});
+	it('accepts --tag on model, dataset, and Space roots and owner scopes', () => {
 		for (const uri of [
-			'hf://spaces/example-owner',
 			'hf://models',
+			'hf://models/openbmb',
 			'hf://datasets',
-			'hf://collections',
-			'hf://papers',
-			'hf://docs',
+			'hf://datasets/alice',
+			'hf://spaces',
+			'hf://spaces/alice',
 		]) {
-			expect(() => parseHfFsRequest({ cmd: 'search', args: [uri, 'demo', flag, 'mcp'] })).toThrow(
-				'exact root, not owner scopes or other roots'
+			expect(parseHfFsRequest({ cmd: 'search', args: [uri, '--tag', 'gguf'] }).params).toEqual({
+				op: 'search',
+				uri,
+				tags: ['gguf'],
+			});
+		}
+		const longTag = `base_model:quantized:${'o'.repeat(42)}/${'n'.repeat(96)}`;
+		expect(
+			parseHfFsRequest({
+				cmd: 'search',
+				args: ['hf://models', 'chat', '--tag', 'base_model:openbmb/MiniCPM-V-4.7-1B', '--filter', longTag],
+			}).params
+		).toEqual({
+			op: 'search',
+			uri: 'hf://models',
+			query: 'chat',
+			tags: ['base_model:openbmb/MiniCPM-V-4.7-1B', longTag],
+		});
+	});
+
+	it('splits comma-separated tags and rejects or: expressions', () => {
+		expect(parseHfFsRequest({ cmd: 'search', args: ['hf://models', '--tag', 'gguf, license:mit'] })).toEqual({
+			params: { op: 'search', uri: 'hf://models', tags: ['gguf', 'license:mit'] },
+			warnings: ['Split comma-separated --tag values into separate tags (all must match): gguf, license:mit.'],
+		});
+		expect(() => parseHfFsRequest({ cmd: 'search', args: ['hf://models', '--tag', 'gguf,'] })).toThrow(
+			'tags must contain between 1 and 256 characters'
+		);
+		expect(() => parseHfFsRequest({ cmd: 'search', args: ['hf://models', '--tag', 'or:gguf,mlx'] })).toThrow(
+			'or: expressions are not supported'
+		);
+	});
+
+	it('restricts --tag to model, dataset, and Space search scopes', () => {
+		for (const uri of ['hf://collections', 'hf://papers', 'hf://docs', 'hf://collections/alice']) {
+			expect(() => parseHfFsRequest({ cmd: 'search', args: [uri, 'demo', '--tag', 'gguf'] })).toThrow(
+				'--tag is supported only with search hf://models|datasets|spaces[/OWNER]'
+			);
+		}
+		expect(() => parseHfFsRequest({ cmd: 'ls', args: ['hf://models/alice', '--tag', 'gguf'] })).toThrow(
+			'unexpected argument for ls: --tag'
+		);
+	});
+
+	it('restricts --kind to Space roots and owner scopes', () => {
+		for (const uri of ['hf://spaces', 'hf://spaces/alice']) {
+			expect(parseHfFsRequest({ cmd: 'search', args: [uri, '--kind', 'mcp'] }).params).toEqual({
+				op: 'search',
+				uri,
+				space_kind: 'mcp',
+			});
+		}
+		for (const uri of ['hf://models', 'hf://datasets', 'hf://collections', 'hf://papers', 'hf://docs']) {
+			expect(() => parseHfFsRequest({ cmd: 'search', args: [uri, 'demo', '--kind', 'mcp'] })).toThrow(
+				'--kind is supported only with search hf://spaces[/OWNER]'
 			);
 		}
 	});
