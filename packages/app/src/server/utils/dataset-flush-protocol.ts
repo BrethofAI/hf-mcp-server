@@ -16,7 +16,7 @@ export interface DatasetFlushedEvent {
 	remaining: number;
 }
 
-export function isDatasetFlushRequest(message: unknown): boolean {
+function isDatasetFlushRequest(message: unknown): boolean {
 	return (
 		typeof message === 'object' && message !== null && (message as { code?: unknown }).code === DATASET_FLUSH_REQUEST
 	);

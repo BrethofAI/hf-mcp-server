@@ -12,7 +12,7 @@ import type {
 	RuntimeWindowStat,
 } from '../../shared/runtime-metrics.js';
 
-export const RUNTIME_SAMPLE_INTERVAL_MS = 10_000;
+const RUNTIME_SAMPLE_INTERVAL_MS = 10_000;
 const HISTORY_SIZE = 360; // one hour of 10 s samples
 const WINDOW_SAMPLES = { '1m': 6, '15m': 90, '1h': 360 } as const;
 const DELAY_RESOLUTION_MS = 10;

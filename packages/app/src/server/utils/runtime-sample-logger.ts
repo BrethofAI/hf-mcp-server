@@ -17,7 +17,7 @@ export function runtimeSampleLogIntervalMs(env: NodeJS.ProcessEnv = process.env)
  * full daily cycle. Counters (requests, connections, hops) are cumulative since
  * process start; take deltas between rows. No-op when system logging is off.
  */
-export function logRuntimeSample(): void {
+function logRuntimeSample(): void {
 	const snapshot = runtimeMetrics.snapshot();
 	logSystemEvent('runtime_sample', getMcpServerSessionId(), {
 		requestJson: {
