@@ -111,7 +111,7 @@ describe('HfFsTool config', () => {
 		expect(HF_FS_TOOL_CONFIG.description).toContain('{"operations":[{"cmd":"ls","args":["hf://models/org/repo"]}]}');
 		expect(HF_FS_TOOL_CONFIG.description).not.toContain('only tool');
 		expect(HF_FS_TOOL_CONFIG.schema.shape.operations.element.shape.args.description).toBe(
-			'Command arguments. First item must be an hf:// URI, not a local path or bare filename. One argument per array item. search discovers resources, not repository contents; use root/owner discovery scopes, find for file discovery, or cat for a known text file. --tag and --kind require exactly hf://spaces; the only valid --kind value is mcp.'
+			'Command arguments. First item must be an hf:// URI, not a local path or bare filename. One argument per array item. search discovers resources, not repository contents; use root/owner discovery scopes, find for file discovery, or cat for a known text file. --tag requires hf://models|datasets|spaces[/OWNER]; --kind requires hf://spaces[/OWNER] and its only valid value is mcp.'
 		);
 		expect(HF_FS_TOOL_CONFIG.description).toContain('Grammar; each string below is one args array item');
 		expect(HF_FS_TOOL_CONFIG.description).toContain('ls hf://models/trending');
@@ -1343,6 +1343,51 @@ describe('HfFsTool', () => {
 		expect(requestUrl.pathname).toBe('/api/spaces/semantic-search');
 		expect(requestUrl.searchParams.get('q')).toBe('');
 		expect(requestUrl.searchParams.getAll('filter')).toEqual(['mcp-server']);
+	});
+
+	it('passes tag filters to model, dataset, and owner-scoped Space listings', async () => {
+		vi.mocked(listModels).mockReturnValueOnce(entries([]) as ReturnType<typeof listModels>);
+		vi.mocked(listDatasets).mockReturnValueOnce(entries([]) as ReturnType<typeof listDatasets>);
+		vi.mocked(listSpaces).mockReturnValueOnce(entries([]) as ReturnType<typeof listSpaces>);
+		const tool = new HfFsTool('token');
+
+		await tool.run({
+			cmd: 'search',
+			args: ['hf://models', '--tag', 'base_model:finetune:openbmb/MiniCPM-V-4.7-1B', '--limit', '50'],
+		});
+		expect(listModels).toHaveBeenCalledWith({
+			search: { tags: ['base_model:finetune:openbmb/MiniCPM-V-4.7-1B'] },
+			limit: 51,
+			accessToken: 'token',
+		});
+
+		await tool.run({
+			cmd: 'search',
+			args: ['hf://datasets/alice', 'speech', '--tag', 'modality:audio', '--tag', 'language:en'],
+		});
+		expect(listDatasets).toHaveBeenCalledWith({
+			search: { query: 'speech', owner: 'alice', tags: ['modality:audio', 'language:en'] },
+			limit: 101,
+			accessToken: 'token',
+		});
+
+		vi.mocked(listModels).mockReturnValueOnce(entries([]) as ReturnType<typeof listModels>);
+		await expect(
+			tool.run({ cmd: 'search', args: ['hf://models', 'org/base', '--tag', 'base_model:org/base,gguf'] })
+		).resolves.toMatchObject({
+			entries: [],
+			warnings: [
+				'Split comma-separated --tag values into separate tags (all must match): base_model:org/base, gguf.',
+				'No repositories matched both QUERY and --tag. QUERY also filters repository names; retry with --tag alone.',
+			],
+		});
+
+		await tool.run({ cmd: 'search', args: ['hf://spaces/alice', '--kind', 'mcp', '--tag', 'gradio'] });
+		expect(listSpaces).toHaveBeenCalledWith({
+			search: { owner: 'alice', tags: ['gradio', 'mcp-server'] },
+			accessToken: 'token',
+		});
+		expect(fetch).not.toHaveBeenCalled();
 	});
 
 	it('requires an explicit owner for namespace listings regardless of authentication', async () => {

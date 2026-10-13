@@ -5,6 +5,10 @@ export const HF_FS_OPERATIONS = ['ls', 'cat', 'attach', 'stat', 'find', 'search'
 export const HF_FS_ENTRY_TYPES = ['file', 'dir', 'repo', 'bucket', 'collection', 'paper', 'link'] as const;
 export const HF_FS_ATTACH_MAX_BYTES = 8 * 1024 * 1024;
 export const HF_FS_BATCH_MAX_OPERATIONS = 30;
+/** Hub tags such as base_model:quantized:OWNER/NAME can approach 160 characters (42-char owner, 96-char name). */
+const HF_FS_TAG_MAX_LENGTH = 256;
+const HF_FS_MAX_TAGS = 20;
+const TAG_SEARCH_URI_RE = /^hf:\/\/(?:models|datasets|spaces)(?:\/[^/]+)?$/;
 const HF_FS_SEARCH_SORTS = [
 	'createdAt',
 	'downloads',
@@ -46,6 +50,7 @@ Examples:
   {"operations":[{"cmd":"ls","args":["hf://papers/trending"]}]}
   {"operations":[{"cmd":"ls","args":["hf://papers/daily/latest"]}]}
   {"operations":[{"cmd":"cat","args":["hf://papers/2501.00001/paper.md"]}]}
+  {"operations":[{"cmd":"search","args":["hf://models","--tag","base_model:finetune:org/repo"]}]}
 
 Use hf_fs for Hugging Face Hub filesystem operations. Call it with operations, an array of {cmd, args} items; multiple operations may be submitted together.
 
@@ -67,7 +72,7 @@ URI is a canonical hf:// URI. QUERY and GLOB are each one string.
 
 Use search for resource discovery, not repository-content search; ls for a known directory, find for recursive file discovery by name/path (not file contents), stat for filesystem metadata or an uncertain target type, cat for text contents, and attach for a complete JPEG, PNG, or WebP image. When the request gives an exact text-file URI, use cat directly; do not add ls or stat first. stat does not read the contents of JSON, Markdown, or other text files.
 
-Search scopes: hf://models[/OWNER], hf://datasets[/OWNER], hf://spaces[/OWNER], hf://collections[/OWNER], hf://papers, and hf://docs[/...]. Repository and repository-file scopes are not supported: search a resource root or owner scope to discover resources; use find for file discovery within a repository or cat for a known text file. Paper and documentation search require QUERY. --tag (repeatable) and --kind are supported only on exactly hf://spaces, not owner scopes or other roots. The only valid --kind value is mcp, which selects MCP Spaces.
+Search scopes: hf://models[/OWNER], hf://datasets[/OWNER], hf://spaces[/OWNER], hf://collections[/OWNER], hf://papers, and hf://docs[/...]. Repository and repository-file scopes are not supported: search a resource root or owner scope to discover resources; use find for file discovery within a repository or cat for a known text file. Paper and documentation search require QUERY. --tag filters models, datasets, and Spaces by Hub tag (repeatable; all must match) and applies only to hf://models|datasets|spaces[/OWNER]; omit QUERY when the tag already identifies the target, because QUERY also filters repository names. Derived models carry base_model:ID and base_model:RELATION:ID tags, where RELATION is finetune, adapter, merge, or quantized. --kind applies only to hf://spaces[/OWNER]; the only valid --kind value is mcp, which selects MCP Spaces. Tag families are documented at hf://README.md.
 Use ls hf://models/trending, hf://datasets/trending, hf://spaces/trending, or hf://papers/trending for trending listings.
 hf://papers/ID is a paper directory, not paper text. Use cat hf://papers/ID/paper.md for paper text and cat hf://papers/ID/metadata.json for metadata. No preliminary listing is needed for these known paths. Use ls hf://papers/ID to discover other resources.
 Omit --limit, --sort, and --type unless the request requires them. Limits and path-specific behavior are documented at hf://README.md. Issue one hf_fs call.`;
@@ -78,7 +83,7 @@ export const HF_FS_OPERATION_SCHEMA = z
 		args: z
 			.array(z.string())
 			.describe(
-				'Command arguments. First item must be an hf:// URI, not a local path or bare filename. One argument per array item. search discovers resources, not repository contents; use root/owner discovery scopes, find for file discovery, or cat for a known text file. --tag and --kind require exactly hf://spaces; the only valid --kind value is mcp.'
+				'Command arguments. First item must be an hf:// URI, not a local path or bare filename. One argument per array item. search discovers resources, not repository contents; use root/owner discovery scopes, find for file discovery, or cat for a known text file. --tag requires hf://models|datasets|spaces[/OWNER]; --kind requires hf://spaces[/OWNER] and its only valid value is mcp.'
 			),
 	})
 	.strict();
@@ -163,6 +168,7 @@ const SEARCH_FLAGS: CommandOptionMap = {
 	'--entry-type': { key: 'entry_type', kind: 'string' },
 	'--sort': { key: 'sort', kind: 'string' },
 	'--tag': { key: 'tags', kind: 'string', repeatable: true },
+	'--filter': { key: 'tags', kind: 'string', repeatable: true },
 	'--kind': { key: 'space_kind', kind: 'string' },
 	'-limit': { key: 'limit', kind: 'integer' },
 	'--limit': { key: 'limit', kind: 'integer' },
@@ -321,6 +327,12 @@ function normalizeRepoWebPath(type: string, segments: string[]): string {
 }
 
 function normalizeParsedParams(params: HfFsParams): string[] {
+	const warnings: string[] = [];
+	if (params.tags?.some((tag) => tag.includes(','))) {
+		// The Hub treats comma-separated filter values as AND; make that explicit so every tag is matched exactly.
+		params.tags = params.tags.flatMap((tag) => tag.split(',').map((part) => part.trim()));
+		warnings.push(`Split comma-separated --tag values into separate tags (all must match): ${params.tags.join(', ')}.`);
+	}
 	if (
 		params.op === 'ls' &&
 		params.sort === 'trending' &&
@@ -332,9 +344,9 @@ function normalizeParsedParams(params: HfFsParams): string[] {
 		const source = params.uri;
 		params.uri = `${source}/trending`;
 		delete params.sort;
-		return [`Treated --sort trending on ${source} as ${params.uri}.`];
+		warnings.push(`Treated --sort trending on ${source} as ${params.uri}.`);
 	}
-	return [];
+	return warnings;
 }
 
 function validateParsedParams(params: HfFsParams): void {
@@ -357,20 +369,28 @@ function validateParsedParams(params: HfFsParams): void {
 		throw new Error(`EINVAL: invalid Space kind: ${spaceKind}. Supported kinds: mcp`);
 	}
 	if (params.tags !== undefined) {
-		if (params.tags.some((tag) => tag.length === 0 || tag.length > 100)) {
-			throw new Error('EINVAL: Space tags must contain between 1 and 100 characters');
+		if (params.tags.some((tag) => tag.length === 0 || tag.length > HF_FS_TAG_MAX_LENGTH)) {
+			throw new Error(`EINVAL: tags must contain between 1 and ${HF_FS_TAG_MAX_LENGTH.toString()} characters`);
 		}
-		if (params.tags.length > 20) {
-			throw new Error('EINVAL: at most 20 Space tags may be specified');
+		if (params.tags.some((tag) => /^or:/i.test(tag))) {
+			throw new Error(
+				'EINVAL: --tag values must match exactly; or: expressions are not supported. Repeat --tag to require multiple tags.'
+			);
+		}
+		if (params.tags.length > HF_FS_MAX_TAGS) {
+			throw new Error(`EINVAL: at most ${HF_FS_MAX_TAGS.toString()} tags may be specified`);
+		}
+		if (params.op !== 'search' || !TAG_SEARCH_URI_RE.test(params.uri) || isRepoTrendingUri(params.uri)) {
+			throw new Error(
+				'EINVAL: --tag is supported only with search hf://models|datasets|spaces[/OWNER]; remove it for collections, papers, docs, trending listings, and non-search commands'
+			);
 		}
 	}
 	if (
-		(params.tags !== undefined || params.space_kind !== undefined) &&
-		(params.op !== 'search' || params.uri !== 'hf://spaces')
+		params.space_kind !== undefined &&
+		(params.op !== 'search' || !/^hf:\/\/spaces(?:\/[^/]+)?$/.test(params.uri) || isRepoTrendingUri(params.uri))
 	) {
-		throw new Error(
-			'EINVAL: --tag and --kind are supported only with search hf://spaces (exact root, not owner scopes or other roots); remove these filters for owner-scope discovery'
-		);
+		throw new Error('EINVAL: --kind is supported only with search hf://spaces[/OWNER]');
 	}
 	if (
 		params.max_bytes !== undefined &&
