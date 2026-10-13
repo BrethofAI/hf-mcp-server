@@ -114,6 +114,7 @@ describe('WebServer', () => {
 			dynamicSpaceMetrics?: DynamicSpaceLiveMetricsResponse;
 			sessions?: unknown[];
 			hfFsMetrics?: { batches: { total: number }; operations: { completed: number; succeeded: number } };
+			runtimeMetrics?: { reportingSchema: string; http: { totalRequests: number } };
 		};
 
 		expect(response.status).toBe(200);
@@ -128,6 +129,8 @@ describe('WebServer', () => {
 			operations: { invoke: { total: 1, succeeded: 1, failed: 0 } },
 			failuresByStage: { schema: 1 },
 		});
+		expect(body.runtimeMetrics?.reportingSchema).toBe('runtime_v1');
+		expect(body.runtimeMetrics?.http.totalRequests).toBeGreaterThanOrEqual(1);
 		expect(getSessions).not.toHaveBeenCalled();
 	});
 

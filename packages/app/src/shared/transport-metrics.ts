@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { TransportType } from './constants.js';
 import type { DynamicSpaceLiveMetricsResponse } from './dynamic-space-metrics.js';
+import type { RuntimeMetricsResponse } from './runtime-metrics.js';
 
 export type ProtocolEra = 'legacy' | 'modern';
 export type SubscriptionMethod = 'resources/subscribe' | 'resources/unsubscribe' | 'subscriptions/listen';
@@ -312,6 +313,7 @@ export interface TransportMetricsResponse {
 
 	hfFsMetrics?: HfFsLiveMetricsResponse;
 	dynamicSpaceMetrics?: DynamicSpaceLiveMetricsResponse;
+	runtimeMetrics?: RuntimeMetricsResponse;
 
 	clients: Array<{
 		name: string;

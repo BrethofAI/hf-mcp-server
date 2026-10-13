@@ -105,6 +105,11 @@ export abstract class BaseTransport {
 		return [];
 	}
 
+	/** Number of tracked sessions, without copying them. */
+	getSessionCount(): number {
+		return this.getSessions().length;
+	}
+
 	/**
 	 * Get current transport metrics
 	 */

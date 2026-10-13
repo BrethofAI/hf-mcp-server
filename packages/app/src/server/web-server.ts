@@ -22,6 +22,7 @@ import type { BaseTransport } from './transport/base-transport.js';
 import { formatMetricsForAPI } from '../shared/transport-metrics.js';
 import { getHfFsLiveMetrics } from './utils/hf-fs-live-metrics.js';
 import { getDynamicSpaceLiveMetrics } from './utils/dynamic-space-live-metrics.js';
+import { runtimeMetrics } from './utils/runtime-metrics.js';
 import { CORS_ALLOWED_ORIGINS, CORS_EXPOSED_HEADERS } from '../shared/constants.js';
 import { apiMetrics } from './utils/api-metrics.js';
 import { gradioMetrics } from './utils/gradio-metrics.js';
@@ -73,6 +74,12 @@ export class WebServer {
 			if (process.env.HSTS === 'true') {
 				res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 			}
+			next();
+		});
+
+		// How many proxies appended to X-Forwarded-For (sizes a future trust-proxy setting).
+		this.app.use('/mcp', (req, _res, next) => {
+			runtimeMetrics.recordForwardedFor(req.headers['x-forwarded-for']);
 			next();
 		});
 
@@ -249,6 +256,7 @@ export class WebServer {
 			});
 
 			this.server = server;
+			runtimeMetrics.attachServer(server);
 			server.once('error', handleStartupError);
 		});
 	}
@@ -484,6 +492,7 @@ export class WebServer {
 				const formattedMetrics = formatMetricsForAPI(metrics, this.transportInfo.transport, isStateless, sessions);
 				formattedMetrics.hfFsMetrics = getHfFsLiveMetrics();
 				formattedMetrics.dynamicSpaceMetrics = getDynamicSpaceLiveMetrics();
+				formattedMetrics.runtimeMetrics = runtimeMetrics.snapshot();
 
 				// Add API metrics if in external API mode
 				if (this.transportInfo.externalApiMode) {

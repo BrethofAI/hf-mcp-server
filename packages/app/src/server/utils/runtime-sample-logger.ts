@@ -1,0 +1,44 @@
+import { getMcpServerSessionId, logSystemEvent } from './query-logger.js';
+import { runtimeMetrics } from './runtime-metrics.js';
+
+const DEFAULT_INTERVAL_MS = 60_000;
+let timer: NodeJS.Timeout | undefined;
+
+export function runtimeSampleLogIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env.RUNTIME_METRICS_LOG_INTERVAL_MS;
+	if (raw === undefined || raw.trim() === '') return DEFAULT_INTERVAL_MS;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_INTERVAL_MS;
+}
+
+/**
+ * Record a compact runtime sample in the System dataset stream (methodName
+ * `runtime_sample`) so load, CPU and connection reuse can be analysed over a
+ * full daily cycle. Counters (requests, connections, hops) are cumulative since
+ * process start; take deltas between rows. No-op when system logging is off.
+ */
+export function logRuntimeSample(): void {
+	const snapshot = runtimeMetrics.snapshot();
+	logSystemEvent('runtime_sample', getMcpServerSessionId(), {
+		requestJson: {
+			pid: snapshot.pid,
+			current: snapshot.current,
+			lastMinute: snapshot.windows['1m'],
+			memory: snapshot.memory,
+			http: snapshot.http,
+			forwardedForHops: snapshot.forwardedForHops,
+			legacySessions: snapshot.legacySessions,
+		},
+	});
+}
+
+export function startRuntimeSampleLogging(intervalMs = runtimeSampleLogIntervalMs()): void {
+	if (timer || intervalMs <= 0) return;
+	timer = setInterval(logRuntimeSample, intervalMs);
+	timer.unref();
+}
+
+export function stopRuntimeSampleLogging(): void {
+	if (timer) clearInterval(timer);
+	timer = undefined;
+}
